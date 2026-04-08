@@ -1,0 +1,78 @@
+<script context="server">
+  const { MongoClient } = require('mongodb')
+
+  async function getDb() {
+    const client = new MongoClient('mongodb://localhost:27017')
+    await client.connect()
+    return client
+  }
+
+  const client = await getDb()
+  const brews = await client.db('jardin').collection('batches').find().toArray()
+  await client.close()
+
+  return {
+    data: { brews },
+    actions: {
+      async updateRating({ id, rating }) {
+        const c = await getDb()
+        await c.db('jardin').collection('batches').updateOne(
+          { batch_id: id },
+          { $set: { rating } }
+        )
+        await c.close()
+      }
+    }
+  }
+</script>
+
+<script>
+  export let brews = [];
+
+  $: avgRating = brews
+    .filter(b => b.rating)
+    .reduce((sum, b, _, arr) => sum + b.rating / arr.length, 0)
+    .toFixed(1);
+
+  $: totalBatches = brews.length;
+</script>
+
+<h1>Cold Brew Batches</h1>
+
+<p>{totalBatches} batch(es) — average rating: ★ {avgRating}</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Start</th>
+      <th>End</th>
+      <th>Vessel</th>
+      <th>Ingredients</th>
+      <th>Steeped</th>
+      <th>Rating</th>
+      <th>Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+    {#each brews as brew}
+      <tr>
+        <td>{brew.batch_id}</td>
+        <td>{brew.date_start ? new Date(brew.date_start).toLocaleString() : '-'}</td>
+        <td>{brew.date_end ? new Date(brew.date_end).toLocaleString() : '-'}</td>
+        <td>{brew.vessel_ml}ml</td>
+        <td>{brew.ingredients.map(i => `${i.name} ${i.quantity}`).join(', ')}</td>
+        <td>{brew.actual_steep_hours ? brew.actual_steep_hours + 'h' : '-'}</td>
+        <td>
+          <select onchange={(e) => svdAction('updateRating', { id: brew.batch_id, rating: parseFloat(e.target.value) })}>
+            <option value="" selected={!brew.rating}>-</option>
+            {#each [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5] as r}
+              <option value={r} selected={brew.rating === r}>★ {r}</option>
+            {/each}
+          </select>
+        </td>
+        <td>{brew.taste_notes ?? '-'}</td>
+      </tr>
+    {/each}
+  </tbody>
+</table>
