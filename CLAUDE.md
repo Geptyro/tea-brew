@@ -53,5 +53,5 @@ Docker container `cold-brew-notifier`, polls every 5 min.
 - Auto-rebuild on file save: `node notifier/watch.js`
 
 ## File watcher (sveld extension)
-Saves to `cold-brew.sveld` auto-refresh the VS Code preview via `onDidSaveTextDocument`.
+Saves to `.sveld` files auto-refresh the VS Code preview via `onDidSaveTextDocument`.
 If not refreshing: run `Developer: Restart Extension Host`.

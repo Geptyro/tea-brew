@@ -2,9 +2,10 @@
   import { onMount } from 'svelte'
 
   const links = [
-    { label: 'Batches', file: 'cold-brew.sveld' },
-    { label: 'Compare', file: 'compare.sveld' },
-    { label: 'Chart',   file: 'chart.sveld' },
+    { label: 'Batches',     file: 'batches.sveld' },
+    { label: 'Compare',     file: 'compare.sveld' },
+    { label: 'Chart',       file: 'chart.sveld' },
+    { label: 'Ingredients', file: 'ingredients.sveld' },
   ];
 
   const currentFile = typeof __SVELD_FILE__ !== 'undefined' ? __SVELD_FILE__ : '';
@@ -26,7 +27,10 @@
       onclick={() => link.file !== currentFile && sveldOpen('./' + link.file)}
     >{link.label}</button>
   {/each}
-  <button class="btn-edit" onclick={() => sveldEdit()} title="Open in text editor">&lt;/&gt;</button>
+  <div class="nav-right">
+    <button class="btn-icon" onclick={() => sveldAction('refresh')} title="Refresh">↻</button>
+    <button class="btn-icon" onclick={() => sveldEdit()} title="Open in text editor">&lt;/&gt;</button>
+  </div>
 </nav>
 <div class="nav-spacer"></div>
 
@@ -48,13 +52,13 @@
   .link:hover { color: var(--text-muted); }
   .link.active { color: var(--accent); background: var(--accent-bg); cursor: default; }
   .link--focused { color: #ffb86c !important; }
-  .btn-edit {
-    margin-left: auto;
+  .btn-icon {
     font-family: inherit; font-size: 0.7rem;
     background: none; border: none; cursor: pointer;
     color: var(--text-dim); padding: 3px 8px; border-radius: 3px;
     transition: color 0.15s;
   }
-  .btn-edit:hover { color: var(--text-muted); }
+  .btn-icon:hover { color: var(--text-muted); }
+  .nav-right { margin-left: auto; display: flex; align-items: center; }
   .nav-spacer { height: 2.25rem; }
 </style>

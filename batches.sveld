@@ -1,26 +1,31 @@
 <script context="server">
   const { getDb, MONGO_DB } = require('./src/db.js')
 
-  async function fetchBrews() {
+  async function fetchData() {
     const c = await getDb()
-    const result = await c.db(MONGO_DB).collection('batches').aggregate([
-      { $addFields: { status: { $switch: { branches: [
-        { case: { $toBool: '$date_end' }, then: 'done' },
-        { case: { $toBool: { $first: '$steps.confirmed_at' } }, then: 'steeping' }
-      ], default: 'planned' }}}},
-      { $sort: { batch_id: -1 } }
-    ]).toArray()
+    const [brews, ingredientDocs] = await Promise.all([
+      c.db(MONGO_DB).collection('batches').aggregate([
+        { $addFields: { status: { $switch: { branches: [
+          { case: { $toBool: '$date_end' }, then: 'done' },
+          { case: { $toBool: { $first: '$steps.confirmed_at' } }, then: 'steeping' }
+        ], default: 'planned' }}}},
+        { $sort: { batch_id: -1 } }
+      ]).toArray(),
+      c.db(MONGO_DB).collection('ingredients').find({}, { projection: { name: 1, icon: 1 } }).toArray()
+    ])
     await c.close()
-    return result
+    const icons = Object.fromEntries(ingredientDocs.filter(d => d.icon).map(d => [d.name, d.icon]))
+    return { brews, icons }
   }
 
-  const brews = await fetchBrews()
+  const { brews, icons } = await fetchData()
 
   return {
-    data: { brews },
+    data: { brews, icons },
     actions: {
-      async getBrews() {
-        return fetchBrews()
+      async refresh() {
+        sveld.update(await fetchData())
+        return true
       },
       async updateRating({ id, rating }) {
         const c = await getDb()
@@ -81,14 +86,34 @@
         )
         await c.close()
       },
+      async addTasteSession({ id, ratings, note }) {
+        const c = await getDb()
+        const entry = { date: new Date(), type: 'taste', ratings, text: note?.trim() || '' }
+        await c.db(MONGO_DB).collection('batches').updateOne(
+          { batch_id: id }, { $push: { notes: entry } }
+        )
+        await c.close()
+        shared.emit('dataChange', { type: 'taste' })
+      },
+      async updateTasteSession({ id, index, date, ratings, note }) {
+        const c = await getDb()
+        await c.db(MONGO_DB).collection('batches').updateOne(
+          { batch_id: id },
+          { $set: { [`notes.${index}`]: { date: new Date(date), type: 'taste', ratings, text: note?.trim() || '' } } }
+        )
+        await c.close()
+        shared.emit('dataChange', { type: 'taste' })
+      },
       async deleteNote({ id, index }) {
         const c = await getDb()
         const doc = await c.db(MONGO_DB).collection('batches').findOne({ batch_id: id })
+        const deletedType = doc.notes?.[index]?.type ?? 'note'
         const notes = (doc.notes || []).filter((_, i) => i !== index)
         await c.db(MONGO_DB).collection('batches').updateOne(
           { batch_id: id }, { $set: { notes } }
         )
         await c.close()
+        if (deletedType === 'taste') shared.emit('dataChange', { type: 'taste' })
       }
     }
   }
@@ -99,15 +124,9 @@
   import Header from './src/Header.svelte'
 
   export let brews = [];
+  export let icons = {};
 
   const theme = document.body.classList.contains('vscode-light') ? 'light' : 'dark';
-
-  let refreshing = false;
-  async function refresh() {
-    refreshing = true;
-    brews = await sveldAction('getBrews');
-    refreshing = false;
-  }
 
   $: done     = brews.filter(b => b.status === 'done');
   $: steeping = brews.filter(b => b.status === 'steeping');
@@ -120,16 +139,13 @@
 <div class="root" class:theme-light={theme === 'light'}>
 
 <Header />
-<div class="toolbar">
-  <button class="btn-refresh" class:spinning={refreshing} onclick={refresh}>↻</button>
-</div>
 
 {#if steeping.length}
   <section>
     <div class="section-label">Steeping now</div>
     <div class="cards cards--col">
       {#each steeping as brew}
-        <BrewCard {brew} variant="steeping" />
+        <BrewCard {brew} {icons} variant="steeping" />
       {/each}
     </div>
   </section>
@@ -140,7 +156,7 @@
     <div class="section-label">Planned</div>
     <div class="cards cards--col">
       {#each planned as brew}
-        <BrewCard {brew} variant="planned" />
+        <BrewCard {brew} {icons} variant="planned" />
       {/each}
     </div>
   </section>
@@ -151,7 +167,7 @@
     <div class="section-label">Done {#if avgRating}<span class="section-avg">· avg ★ {avgRating}</span>{/if}</div>
     <div class="cards cards--col">
       {#each done as brew}
-        <BrewCard {brew} variant="done" />
+        <BrewCard {brew} {icons} variant="done" />
       {/each}
     </div>
   </section>
@@ -161,19 +177,6 @@
 
 <style lang="scss">
   @import './src/theme.scss';
-
-  .toolbar {
-    display: flex; align-items: center; justify-content: flex-end;
-    margin-bottom: 0.75rem; margin-top: -0.5rem;
-  }
-  .btn-refresh {
-    background: none; border: none; cursor: pointer;
-    font-size: 1rem; color: var(--text-dim);
-    padding: 2px 6px; border-radius: 3px; transition: color 0.15s;
-    &:hover { color: var(--accent); }
-    &.spinning { animation: spin 0.6s linear infinite; }
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   section { margin-bottom: 2rem; }
   .section-label {

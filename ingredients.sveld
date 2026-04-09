@@ -1,0 +1,256 @@
+<script context="server">
+  const { getDb, MONGO_DB } = require('./src/db.js')
+
+  function normalizeExtraction(val) {
+    if (typeof val === 'number') return val;
+    if (val === 'under') return 25;
+    if (val === 'right') return 50;
+    if (val === 'over')  return 75;
+    return null;
+  }
+
+  async function fetchIngredients() {
+    const c = await getDb()
+    const [batches, ingredientDocs] = await Promise.all([
+      c.db(MONGO_DB).collection('batches').find({}, {
+        projection: { batch_id: 1, steps: 1, ingredients: 1, notes: 1, vessel_ml: 1 }
+      }).toArray(),
+      c.db(MONGO_DB).collection('ingredients').find().toArray()
+    ])
+    await c.close()
+
+    const statsMap = {}, chartMap = {}
+
+    for (const batch of batches) {
+      const steps = batch.steps || [{ offset_hours: 0, confirmed_at: null, ingredients: batch.ingredients || [] }]
+      const tasteSessions = (batch.notes || []).filter(n => n.type === 'taste')
+      const vesselL = (batch.vessel_ml || 1000) / 1000
+      const ingStep = {}, ingQuantity = {}
+
+      for (const step of steps) {
+        for (const ing of (step.ingredients || [])) {
+          ingStep[ing.name] = step
+          if      (ing.quantity_g)  ingQuantity[ing.name] = { per_l: Math.round(ing.quantity_g  / vesselL * 10) / 10, unit: 'g/L' }
+          else if (ing.quantity_ml) ingQuantity[ing.name] = { per_l: Math.round(ing.quantity_ml / vesselL * 10) / 10, unit: 'ml/L' }
+          else if (ing.quantity_u)  ingQuantity[ing.name] = { per_l: Math.round(ing.quantity_u  / vesselL * 10) / 10, unit: 'u/L' }
+        }
+      }
+
+      for (const ing of steps.flatMap(s => s.ingredients || [])) {
+        if (!statsMap[ing.name]) statsMap[ing.name] = { name: ing.name, count: 0, extractions: [], rated: 0 }
+        statsMap[ing.name].count++
+      }
+
+      for (const taste of tasteSessions) {
+        const tasteMs = new Date(taste.date).getTime()
+        for (const [name, r] of Object.entries(taste.ratings || {})) {
+          const val = normalizeExtraction(r.extraction)
+          if (val === null) continue
+          const stepMs = ingStep[name]?.confirmed_at ? new Date(ingStep[name].confirmed_at).getTime() : null
+          if (!stepMs) continue
+          const infusion_hours = Math.round((tasteMs - stepMs) / 360000) / 10
+          if (infusion_hours < 0) continue
+          if (!chartMap[name]) chartMap[name] = []
+          chartMap[name].push({ infusion_hours, extraction: val, note: r.note || '', batch_id: batch.batch_id, quantity_per_l: ingQuantity[name]?.per_l ?? null, quantity_unit: ingQuantity[name]?.unit ?? null })
+          if (!statsMap[name]) statsMap[name] = { name, count: 0, extractions: [], rated: 0 }
+          statsMap[name].extractions.push(val)
+          statsMap[name].rated++
+        }
+      }
+    }
+
+    const docsMap = Object.fromEntries(ingredientDocs.map(d => [d.name, d]))
+    return Object.values(statsMap)
+      .sort((a, b) => b.count - a.count)
+      .map(s => ({ ...s, avg: s.extractions.length ? Math.round(s.extractions.reduce((a, b) => a + b) / s.extractions.length) : null, chartPoints: chartMap[s.name] || [], notes: docsMap[s.name]?.notes ?? '', icon: docsMap[s.name]?.icon ?? '' }))
+  }
+
+  const ingredients = await fetchIngredients()
+
+  shared.on('dataChange', async ({ type } = {}) => {
+    if (!type || type === 'taste') {
+      sveld.update({ ingredients: await fetchIngredients() })
+    }
+  })
+
+  return {
+    data: { ingredients },
+    actions: {
+      async refresh() {
+        sveld.update({ ingredients: await fetchIngredients() })
+        return true
+      },
+      async updateNotes({ name, notes }) {
+        const c = await getDb()
+        await c.db(MONGO_DB).collection('ingredients').updateOne(
+          { name }, { $set: { name, notes } }, { upsert: true }
+        )
+        await c.close()
+        return true
+      },
+      async updateIcon({ name, icon }) {
+        const c = await getDb()
+        await c.db(MONGO_DB).collection('ingredients').updateOne(
+          { name }, { $set: { name, icon } }, { upsert: true }
+        )
+        await c.close()
+        return true
+      }
+    }
+  }
+</script>
+
+<script>
+  import Header from './src/Header.svelte'
+  import IngredientChart from './src/IngredientChart.svelte'
+  export let ingredients = []
+
+  let expanded = new Set(ingredients.map(i => i.name))
+
+  function avgZone(val) {
+    if (val === null) return null;
+    if (val < 40) return 'under';
+    if (val > 60) return 'over';
+    return 'right';
+  }
+  const zoneColor = { under: '#ffb86c', right: '#4ecdc4', over: '#ff6b6b' }
+  const zoneSymbol = { under: '↓', right: '✓', over: '↑' }
+</script>
+
+<div class="root">
+  <Header />
+
+  {#if ingredients.length === 0}
+    <p class="empty">No ingredients found. Start some batches first.</p>
+  {:else}
+    <div class="table">
+      <div class="row row--header">
+        <span></span>
+        <span>ingredient</span>
+        <span>batches</span>
+        <span>avg extraction</span>
+        <span>notes</span>
+      </div>
+      {#each ingredients as ing}
+        {@const zone = avgZone(ing.avg)}
+        <div class="row" class:row--expanded={expanded.has(ing.name)}>
+          <span class="col-icon" contenteditable="true"
+            onblur={(e) => {
+              const icon = e.target.innerText.trim()
+              if (icon !== ing.icon) sveldAction('updateIcon', { name: ing.name, icon })
+            }}>{ing.icon}</span>
+          <button class="col-name" onclick={() => { if (expanded.has(ing.name)) expanded.delete(ing.name); else expanded.add(ing.name); expanded = expanded; }}>
+            {ing.name}
+            {#if ing.chartPoints.length > 0}<span class="chart-hint">{expanded.has(ing.name) ? '↑' : '↗'}</span>{/if}
+          </button>
+          <span class="col-count">{ing.count}</span>
+          <span class="col-avg">
+            {#if zone}
+              <span class="avg-badge" style="color:{zoneColor[zone]}; background:{zoneColor[zone]}18">
+                {zoneSymbol[zone]} {ing.avg}
+              </span>
+              <span class="avg-sub">/ {ing.rated} tasted</span>
+            {:else}
+              <span class="ext-none">—</span>
+            {/if}
+          </span>
+          <span class="col-notes">
+            <span class="notes-edit" contenteditable="true"
+              onblur={(e) => {
+                const notes = e.target.innerText.trim()
+                if (notes !== ing.notes) sveldAction('updateNotes', { name: ing.name, notes })
+              }}>{ing.notes}</span>
+            {#if !ing.notes}<span class="notes-placeholder" aria-hidden="true">add notes…</span>{/if}
+          </span>
+        </div>
+        {#if expanded.has(ing.name)}
+          <div class="chart-row">
+            <div class="chart-pair">
+              <div class="chart-col">
+                <div class="chart-col-label">infusion time</div>
+                <IngredientChart points={ing.chartPoints} mode="time" />
+              </div>
+              <div class="chart-col">
+                <div class="chart-col-label">quantity</div>
+                <IngredientChart points={ing.chartPoints} mode="quantity" />
+              </div>
+            </div>
+          </div>
+        {/if}
+      {/each}
+    </div>
+  {/if}
+</div>
+
+<style lang="scss">
+  @import './src/theme.scss';
+
+  .root { padding-top: 0.5rem; }
+  .empty { color: var(--text-dim); font-style: italic; font-size: 0.85rem; }
+
+  .table { display: flex; flex-direction: column; }
+
+  .row {
+    display: grid;
+    grid-template-columns: 1.5rem 10rem 4rem 9rem 1fr;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.8rem;
+  }
+  .row--header {
+    font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-dim); font-weight: 700;
+    border-bottom: 2px solid var(--border);
+  }
+
+  .col-icon {
+    font-size: 0.9rem; text-align: center;
+    outline: none; border-radius: 3px; cursor: text;
+    min-width: 1.5rem; min-height: 1.2em;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .col-icon:empty::after { content: '·'; color: var(--text-dim); font-size: 0.7rem; }
+  .col-icon:focus { background: var(--bg-input); outline: 1px solid var(--accent-border); }
+
+  .col-name {
+    color: var(--text); font-weight: 500;
+    background: none; border: none; cursor: pointer;
+    font-family: inherit; font-size: inherit;
+    text-align: left; padding: 0;
+    display: flex; align-items: center; gap: 0.3rem;
+  }
+  .col-name:hover { color: var(--accent); }
+  .chart-hint { font-size: 0.65rem; color: var(--text-dim); }
+
+  .col-count { color: var(--text-muted); text-align: center; }
+
+  .col-avg { display: flex; align-items: center; gap: 0.4rem; }
+  .avg-badge { font-size: 0.72rem; padding: 1px 7px; border-radius: 3px; font-weight: 600; }
+  .avg-sub   { font-size: 0.68rem; color: var(--text-dim); }
+  .ext-none  { color: var(--text-dim); font-size: 0.72rem; }
+
+  .chart-row {
+    padding: 0.5rem 0.75rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .chart-pair { display: flex; gap: 0; }
+  .chart-col { display: flex; flex-direction: column; gap: 0.25rem; flex: 1 1 0; min-width: 0; }
+  .chart-col-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); }
+
+  .col-notes { position: relative; }
+  .notes-edit {
+    font-size: 0.78rem; color: var(--text-muted);
+    outline: none; border-radius: 3px; padding: 2px 6px;
+    display: block; min-width: 4rem; min-height: 1.2em;
+  }
+  .notes-edit:focus {
+    background: var(--bg-input); outline: 1px solid var(--accent-border); color: var(--text);
+  }
+  .notes-placeholder {
+    position: absolute; left: 6px; top: 2px;
+    font-size: 0.78rem; color: var(--text-dim); font-style: italic;
+    pointer-events: none;
+  }
+</style>

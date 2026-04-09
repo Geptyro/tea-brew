@@ -1,4 +1,6 @@
 <script>
+  import Rating from './Rating.svelte'
+
   export let batches = [];
 
   function allIngredients(batches) {
@@ -33,13 +35,6 @@
     return null;
   }
 
-  function stars(rating) {
-    if (!rating) return '—';
-    const full = Math.floor(rating);
-    const half = rating % 1 >= 0.5;
-    return '★'.repeat(full) + (half ? '½' : '') + '☆'.repeat(5 - full - (half ? 1 : 0));
-  }
-
   $: cols = allIngredients(batches);
   $: sorted = [...batches].sort((a, b) => a.batch_id - b.batch_id);
 </script>
@@ -71,8 +66,7 @@
           {/each}
           <td class="rating" class:no-rating={!b.rating}>
             {#if b.rating}
-              <span class="stars">{stars(b.rating)}</span>
-              <span class="rating-num">{b.rating}</span>
+              <Rating value={b.rating} />
             {:else}
               —
             {/if}
@@ -119,7 +113,5 @@
   tr:hover td { background: var(--bg-card2); }
 
   .rating { min-width: 8rem; }
-  .stars { color: var(--accent); letter-spacing: 0.05em; }
-  .rating-num { color: var(--text-dim); font-size: 0.68rem; margin-left: 0.4rem; }
   .no-rating { color: var(--text-dim); }
 </style>
