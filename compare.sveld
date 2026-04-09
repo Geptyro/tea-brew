@@ -1,5 +1,5 @@
 <script context="server">
-  const { getDb, MONGO_DB } = require('./db.js')
+  const { getDb, MONGO_DB } = require('./src/db.js')
 
   const c = await getDb()
   const batches = await c.db(MONGO_DB).collection('batches')
@@ -12,8 +12,8 @@
 </script>
 
 <script>
-  import CompareTable from './components/CompareTable.svelte'
-  import Header from './components/Header.svelte'
+  import CompareTable from './src/CompareTable.svelte'
+  import Header from './src/Header.svelte'
 
   export let batches = []
 
@@ -26,5 +26,5 @@
 </div>
 
 <style lang="scss">
-  @import './components/theme.scss';
+  @import './src/theme.scss';
 </style>

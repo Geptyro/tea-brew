@@ -1,5 +1,5 @@
 <script context="server">
-  const { getDb, MONGO_DB } = require('./db.js')
+  const { getDb, MONGO_DB } = require('./src/db.js')
 
   async function fetchBrews() {
     const c = await getDb()
@@ -95,8 +95,8 @@
 </script>
 
 <script>
-  import BrewCard from './components/BrewCard.svelte'
-  import Header from './components/Header.svelte'
+  import BrewCard from './src/BrewCard.svelte'
+  import Header from './src/Header.svelte'
 
   export let brews = [];
 
@@ -160,7 +160,7 @@
 </div>
 
 <style lang="scss">
-  @import './components/theme.scss';
+  @import './src/theme.scss';
 
   .toolbar {
     display: flex; align-items: center; justify-content: flex-end;
