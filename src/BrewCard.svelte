@@ -168,8 +168,8 @@
       if (nextMs === null) continue;
       const diffMs = nextMs - curr.sortMs;
       if (diffMs <= 0) continue;
-      curr.realDiffMs = diffMs;
       curr.realDiffIsRemaining = isStarted && nextMs > now;
+      curr.realDiffMs = curr.realDiffIsRemaining ? nextMs - now : diffMs;
     }
 
     return events;
