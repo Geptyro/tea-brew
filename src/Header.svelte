@@ -2,13 +2,13 @@
   import { onMount } from 'svelte'
 
   const links = [
-    { id: 'batches', label: 'Batches', file: 'cold-brew.sveld' },
-    { id: 'compare', label: 'Compare', file: 'compare.sveld' },
-    { id: 'chart',   label: 'Chart',   file: 'chart.sveld' },
+    { label: 'Batches', file: 'cold-brew.sveld' },
+    { label: 'Compare', file: 'compare.sveld' },
+    { label: 'Chart',   file: 'chart.sveld' },
   ];
 
-  let focusedFile = typeof __SVELD_FILE__ !== 'undefined' ? __SVELD_FILE__ : '';
-  $: current = links.find(l => l.file === focusedFile)?.id ?? '';
+  const currentFile = typeof __SVELD_FILE__ !== 'undefined' ? __SVELD_FILE__ : '';
+  let focusedFile = currentFile;
 
   onMount(() => {
     window.addEventListener('message', (e) => {
@@ -21,9 +21,9 @@
   {#each links as link}
     <button
       class="link"
-      class:active={link.id === current}
+      class:active={link.file === currentFile}
       class:link--focused={link.file === focusedFile}
-      onclick={() => link.id !== current && sveldOpen('./' + link.file)}
+      onclick={() => link.file !== currentFile && sveldOpen('./' + link.file)}
     >{link.label}</button>
   {/each}
   <button class="btn-edit" onclick={() => sveldEdit()} title="Open in text editor">&lt;/&gt;</button>
