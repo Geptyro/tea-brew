@@ -1,0 +1,204 @@
+<script context="server">
+  const { getDb, MONGO_DB } = require('./db.js')
+
+  const c = await getDb()
+  const batches = await c.db(MONGO_DB).collection('batches')
+    .find({ date_end: { $ne: null }, rating: { $ne: null } })
+    .sort({ batch_id: 1 })
+    .toArray()
+  await c.close()
+
+  return { data: { batches } }
+</script>
+
+<script>
+  import { onMount } from 'svelte'
+  import Chart from 'chart.js/auto'
+  import Header from './components/Header.svelte'
+
+  export let batches = []
+
+  const theme = document.body.classList.contains('vscode-light') ? 'light' : 'dark'
+
+  // Palette
+  const ACCENT   = '#4ecdc4'
+  const ACCENT2  = '#ff6b6b'
+  const ACCENT3  = '#ffd166'
+  const ACCENT4  = '#a8dadc'
+  const GRID     = 'rgba(255,255,255,0.06)'
+  const TICK     = '#8b8fa8'
+  const FONT     = "'Share Tech Mono', monospace"
+
+  function axisStyle() {
+    return {
+      grid: { color: GRID },
+      ticks: { color: TICK, font: { family: FONT, size: 11 } }
+    }
+  }
+
+  // --- Chart 1: Rating per batch ---
+  let canvasRating
+
+  // --- Chart 2: g/L per ingredient per batch ---
+  let canvasIngredients
+
+  // --- Chart 3: Steep time vs rating ---
+  let canvasSteep
+
+  onMount(() => {
+    const labels = batches.map(b => `#${b.batch_id}`)
+
+    // ── Chart 1: Rating ──────────────────────────────────────────────────
+    new Chart(canvasRating, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Rating',
+          data: batches.map(b => b.rating ?? null),
+          backgroundColor: `${ACCENT}cc`,
+          borderColor: ACCENT,
+          borderWidth: 1,
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: axisStyle(),
+          y: { ...axisStyle(), min: 0, max: 5, ticks: { ...axisStyle().ticks, stepSize: 1 } }
+        }
+      }
+    })
+
+    // ── Chart 2: g/L per ingredient ──────────────────────────────────────
+    // Collect all unique ingredient names across done batches
+    const ingNames = []
+    for (const b of batches) {
+      for (const step of (b.steps || [])) {
+        for (const ing of (step.ingredients || [])) {
+          if (ing.quantity_g && !ingNames.includes(ing.name)) ingNames.push(ing.name)
+        }
+      }
+    }
+
+    const ingColors = [ACCENT, ACCENT2, ACCENT3, ACCENT4, '#c77dff', '#06d6a0']
+
+    const ingDatasets = ingNames.map((name, i) => ({
+      label: name,
+      data: batches.map(b => {
+        let totalG = 0
+        for (const step of (b.steps || [])) {
+          for (const ing of (step.ingredients || [])) {
+            if (ing.name === name && ing.quantity_g) totalG += ing.quantity_g
+          }
+        }
+        return totalG ? +(totalG / (b.vessel_ml / 1000)).toFixed(1) : null
+      }),
+      backgroundColor: `${ingColors[i % ingColors.length]}99`,
+      borderColor: ingColors[i % ingColors.length],
+      borderWidth: 1,
+      borderRadius: 3,
+    }))
+
+    new Chart(canvasIngredients, {
+      type: 'bar',
+      data: { labels, datasets: ingDatasets },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            display: true,
+            labels: { color: TICK, font: { family: FONT, size: 11 } }
+          }
+        },
+        scales: {
+          x: axisStyle(),
+          y: { ...axisStyle(), title: { display: true, text: 'g / L', color: TICK, font: { family: FONT } } }
+        }
+      }
+    })
+
+    // ── Chart 3: Steep time vs rating (scatter) ──────────────────────────
+    new Chart(canvasSteep, {
+      type: 'scatter',
+      data: {
+        datasets: [{
+          label: 'Steep h vs rating',
+          data: batches.map(b => ({ x: b.total_steep_hours ?? null, y: b.rating ?? null, batch: b.batch_id })),
+          backgroundColor: `${ACCENT2}cc`,
+          borderColor: ACCENT2,
+          pointRadius: 7,
+          pointHoverRadius: 9,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => `#${ctx.raw.batch} — ${ctx.raw.x}h → ★ ${ctx.raw.y}`
+            }
+          }
+        },
+        scales: {
+          x: { ...axisStyle(), title: { display: true, text: 'steep hours', color: TICK, font: { family: FONT } } },
+          y: { ...axisStyle(), min: 0, max: 5, title: { display: true, text: 'rating', color: TICK, font: { family: FONT } } }
+        }
+      }
+    })
+  })
+</script>
+
+<div class="root" class:theme-light={theme === 'light'}>
+  <Header />
+
+  <div class="charts">
+    <section>
+      <div class="chart-label">Rating per batch</div>
+      <canvas bind:this={canvasRating}></canvas>
+    </section>
+
+    <section>
+      <div class="chart-label">Ingredient ratio (g/L) per batch</div>
+      <canvas bind:this={canvasIngredients}></canvas>
+    </section>
+
+    <section>
+      <div class="chart-label">Steep time vs rating</div>
+      <canvas bind:this={canvasSteep}></canvas>
+    </section>
+  </div>
+</div>
+
+<style lang="scss">
+  @import './components/theme.scss';
+
+  .charts {
+    display: flex;
+    flex-direction: column;
+    gap: 2.5rem;
+  }
+
+  section {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+  }
+
+  .chart-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+    color: var(--text-dim);
+    margin-bottom: 1rem;
+  }
+
+  canvas {
+    max-height: 260px;
+  }
+</style>

@@ -1,0 +1,60 @@
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+* { box-sizing: border-box; }
+
+.root {
+  font-family: 'Share Tech Mono', 'Fira Code', monospace;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+
+  --bg:            #1e2334;
+  --bg-card:       #252d42;
+  --bg-card2:      #2c3450;
+  --bg-input:      #1a2030;
+  --border:        rgba(100,150,255,0.12);
+  --border-card:   rgba(100,150,255,0.15);
+  --text:          #e8eaf0;
+  --text-muted:    rgba(232,234,240,0.5);
+  --text-dim:      rgba(232,234,240,0.3);
+  --accent:        #4ecdc4;
+  --accent-bg:     rgba(78,205,196,0.1);
+  --accent-border: rgba(78,205,196,0.3);
+  --c-done:        #4ecdc4;
+  --c-done-bg:     rgba(78,205,196,0.1);
+  --c-done-border: rgba(78,205,196,0.35);
+  --c-active:      #c8a8ff;
+  --c-active-bg:   rgba(200,168,255,0.1);
+  --c-active-border: rgba(200,168,255,0.35);
+  --c-pending:     rgba(232,234,240,0.2);
+  --c-steeping:    #4ecdc4;
+  --c-planned:     #ffb86c;
+  --c-done-status: #8fff9f;
+  --shadow:        0 4px 16px rgba(0,0,0,0.35);
+
+  &.theme-light {
+    --bg:            #f0f2f8;
+    --bg-card:       #ffffff;
+    --bg-card2:      #f5f7fc;
+    --bg-input:      #eef0f6;
+    --border:        rgba(60,100,180,0.1);
+    --border-card:   rgba(60,100,180,0.15);
+    --text:          #1a1f2e;
+    --text-muted:    rgba(26,31,46,0.55);
+    --text-dim:      rgba(26,31,46,0.35);
+    --accent:        #2bb5ad;
+    --accent-bg:     rgba(43,181,173,0.08);
+    --accent-border: rgba(43,181,173,0.3);
+    --c-done:        #2bb5ad;
+    --c-done-bg:     rgba(43,181,173,0.08);
+    --c-done-border: rgba(43,181,173,0.3);
+    --c-active:      #7048e8;
+    --c-active-bg:   rgba(112,72,232,0.08);
+    --c-active-border: rgba(112,72,232,0.3);
+    --c-pending:     rgba(26,31,46,0.15);
+    --c-steeping:    #2bb5ad;
+    --c-planned:     #e08000;
+    --c-done-status: #2a9e44;
+    --shadow:        0 2px 12px rgba(0,0,0,0.08);
+  }
+}

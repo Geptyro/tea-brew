@@ -1,0 +1,30 @@
+<script context="server">
+  const { getDb, MONGO_DB } = require('./db.js')
+
+  const c = await getDb()
+  const batches = await c.db(MONGO_DB).collection('batches')
+    .find({ date_end: { $ne: null } })
+    .sort({ batch_id: 1 })
+    .toArray()
+  await c.close()
+
+  return { data: { batches } }
+</script>
+
+<script>
+  import CompareTable from './components/CompareTable.svelte'
+  import Header from './components/Header.svelte'
+
+  export let batches = []
+
+  const theme = document.body.classList.contains('vscode-light') ? 'light' : 'dark'
+</script>
+
+<div class="root" class:theme-light={theme === 'light'}>
+  <Header />
+  <CompareTable {batches} />
+</div>
+
+<style lang="scss">
+  @import './components/theme.scss';
+</style>

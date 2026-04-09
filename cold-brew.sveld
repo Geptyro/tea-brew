@@ -1,24 +1,92 @@
 <script context="server">
-  const { MongoClient } = require('mongodb')
+  const { getDb, MONGO_DB } = require('./db.js')
 
-  async function getDb() {
-    const client = new MongoClient('mongodb://localhost:27017')
-    await client.connect()
-    return client
+  async function fetchBrews() {
+    const c = await getDb()
+    const result = await c.db(MONGO_DB).collection('batches').aggregate([
+      { $addFields: { status: { $switch: { branches: [
+        { case: { $toBool: '$date_end' }, then: 'done' },
+        { case: { $toBool: { $first: '$steps.confirmed_at' } }, then: 'steeping' }
+      ], default: 'planned' }}}},
+      { $sort: { batch_id: -1 } }
+    ]).toArray()
+    await c.close()
+    return result
   }
 
-  const client = await getDb()
-  const brews = await client.db('jardin').collection('batches').find().toArray()
-  await client.close()
+  const brews = await fetchBrews()
 
   return {
     data: { brews },
     actions: {
+      async getBrews() {
+        return fetchBrews()
+      },
       async updateRating({ id, rating }) {
         const c = await getDb()
-        await c.db('jardin').collection('batches').updateOne(
-          { batch_id: id },
-          { $set: { rating } }
+        await c.db(MONGO_DB).collection('batches').updateOne(
+          { batch_id: id }, { $set: { rating: parseFloat(rating) } }
+        )
+        await c.close()
+      },
+      async addNote({ id, text }) {
+        const c = await getDb()
+        await c.db(MONGO_DB).collection('batches').updateOne(
+          { batch_id: id }, { $push: { notes: { date: new Date(), text } } }
+        )
+        await c.close()
+      },
+      async editNote({ id, index, text }) {
+        const c = await getDb()
+        await c.db(MONGO_DB).collection('batches').updateOne(
+          { batch_id: id }, { $set: { [`notes.${index}.text`]: text } }
+        )
+        await c.close()
+      },
+      async confirmStep({ id, offset_hours }) {
+        const c = await getDb()
+        const doc = await c.db(MONGO_DB).collection('batches').findOne({ batch_id: id })
+        const idx = doc.steps.findIndex(s => s.offset_hours === offset_hours)
+        if (idx === -1) { await c.close(); return }
+        await c.db(MONGO_DB).collection('batches').updateOne(
+          { batch_id: id }, { $set: { [`steps.${idx}.confirmed_at`]: new Date() } }
+        )
+        await c.close()
+      },
+      async extendSteep({ id, newEndMs, noteText }) {
+        const c = await getDb()
+        const doc = await c.db(MONGO_DB).collection('batches').findOne({ batch_id: id })
+        const startMs = new Date(doc.steps[0].confirmed_at).getTime()
+        const totalHours = Math.round((newEndMs - startMs) / 360000) / 10
+        const label = new Date(newEndMs).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        const text = noteText ? `end extended to ${label} — ${noteText}` : `end extended to ${label}`
+        await c.db(MONGO_DB).collection('batches').updateOne({ batch_id: id }, {
+          $set: { total_steep_hours: totalHours },
+          $push: { notes: { date: new Date(), text } },
+          $pull: { notified: 'ready' }
+        })
+        await c.close()
+      },
+      async markDone({ id }) {
+        const c = await getDb()
+        await c.db(MONGO_DB).collection('batches').updateOne(
+          { batch_id: id }, { $set: { date_end: new Date() } }
+        )
+        await c.close()
+      },
+      async updateTaste({ id, field, value }) {
+        const c = await getDb()
+        await c.db(MONGO_DB).collection('batches').updateOne(
+          { batch_id: id }, { $set: { [`taste.${field}`]: parseFloat(value) } }
+        )
+        await c.close()
+      },
+      async deleteNote({ id, index }) {
+        const c = await getDb()
+        const doc = await c.db(MONGO_DB).collection('batches').findOne({ batch_id: id })
+        const notes = (doc.notes || []).filter((_, i) => i !== index)
+        await c.db(MONGO_DB).collection('batches').updateOne(
+          { batch_id: id }, { $set: { notes } }
         )
         await c.close()
       }
@@ -27,52 +95,94 @@
 </script>
 
 <script>
+  import BrewCard from './components/BrewCard.svelte'
+  import Header from './components/Header.svelte'
+
   export let brews = [];
 
-  $: avgRating = brews
-    .filter(b => b.rating)
-    .reduce((sum, b, _, arr) => sum + b.rating / arr.length, 0)
-    .toFixed(1);
+  const theme = document.body.classList.contains('vscode-light') ? 'light' : 'dark';
 
-  $: totalBatches = brews.length;
+  let refreshing = false;
+  async function refresh() {
+    refreshing = true;
+    brews = await sveldAction('getBrews');
+    refreshing = false;
+  }
+
+  $: done     = brews.filter(b => b.status === 'done');
+  $: steeping = brews.filter(b => b.status === 'steeping');
+  $: planned  = brews.filter(b => b.status === 'planned');
+  $: avgRating = done.filter(b => b.rating).length
+    ? (done.filter(b => b.rating).reduce((s, b) => s + b.rating, 0) / done.filter(b => b.rating).length).toFixed(1)
+    : null;
 </script>
 
-<h1>Cold Brew Batches</h1>
+<div class="root" class:theme-light={theme === 'light'}>
 
-<p>{totalBatches} batch(es) — average rating: ★ {avgRating}</p>
+<Header />
+<div class="toolbar">
+  <button class="btn-refresh" class:spinning={refreshing} onclick={refresh}>↻</button>
+</div>
 
-<table>
-  <thead>
-    <tr>
-      <th>#</th>
-      <th>Start</th>
-      <th>End</th>
-      <th>Vessel</th>
-      <th>Ingredients</th>
-      <th>Steeped</th>
-      <th>Rating</th>
-      <th>Notes</th>
-    </tr>
-  </thead>
-  <tbody>
-    {#each brews as brew}
-      <tr>
-        <td>{brew.batch_id}</td>
-        <td>{brew.date_start ? new Date(brew.date_start).toLocaleString() : '-'}</td>
-        <td>{brew.date_end ? new Date(brew.date_end).toLocaleString() : '-'}</td>
-        <td>{brew.vessel_ml}ml</td>
-        <td>{brew.ingredients.map(i => `${i.name} ${i.quantity}`).join(', ')}</td>
-        <td>{brew.actual_steep_hours ? brew.actual_steep_hours + 'h' : '-'}</td>
-        <td>
-          <select onchange={(e) => svdAction('updateRating', { id: brew.batch_id, rating: parseFloat(e.target.value) })}>
-            <option value="" selected={!brew.rating}>-</option>
-            {#each [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5] as r}
-              <option value={r} selected={brew.rating === r}>★ {r}</option>
-            {/each}
-          </select>
-        </td>
-        <td>{brew.taste_notes ?? '-'}</td>
-      </tr>
-    {/each}
-  </tbody>
-</table>
+{#if steeping.length}
+  <section>
+    <div class="section-label">Steeping now</div>
+    <div class="cards cards--col">
+      {#each steeping as brew}
+        <BrewCard {brew} variant="steeping" />
+      {/each}
+    </div>
+  </section>
+{/if}
+
+{#if planned.length}
+  <section>
+    <div class="section-label">Planned</div>
+    <div class="cards cards--col">
+      {#each planned as brew}
+        <BrewCard {brew} variant="planned" />
+      {/each}
+    </div>
+  </section>
+{/if}
+
+{#if done.length}
+  <section>
+    <div class="section-label">Done {#if avgRating}<span class="section-avg">· avg ★ {avgRating}</span>{/if}</div>
+    <div class="cards cards--col">
+      {#each done as brew}
+        <BrewCard {brew} variant="done" />
+      {/each}
+    </div>
+  </section>
+{/if}
+
+</div>
+
+<style lang="scss">
+  @import './components/theme.scss';
+
+  .toolbar {
+    display: flex; align-items: center; justify-content: flex-end;
+    margin-bottom: 0.75rem; margin-top: -0.5rem;
+  }
+  .btn-refresh {
+    background: none; border: none; cursor: pointer;
+    font-size: 1rem; color: var(--text-dim);
+    padding: 2px 6px; border-radius: 3px; transition: color 0.15s;
+    &:hover { color: var(--accent); }
+    &.spinning { animation: spin 0.6s linear infinite; }
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  section { margin-bottom: 2rem; }
+  .section-label {
+    font-size: 0.72rem; text-transform: uppercase;
+    letter-spacing: 0.12em; font-weight: 700;
+    color: var(--text-dim); margin-bottom: 0.65rem;
+  }
+  .section-avg { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--accent); }
+
+  .cards { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+  .cards--col { flex-direction: column; }
+</style>
